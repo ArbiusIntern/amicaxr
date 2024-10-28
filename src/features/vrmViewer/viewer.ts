@@ -23,6 +23,7 @@ import Stats from "stats.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { InteractiveGroup } from "three/examples/jsm/interactive/InteractiveGroup.js";
 import { HTMLMesh } from "three/examples/jsm/interactive/HTMLMesh.js";
+import { CCDIKHelper, CCDIKSolver } from "three/examples/jsm/animation/CCDIKSolver.js";
 
 import { loadVRMAnimation } from "@/lib/VRMAnimation/loadVRMAnimation";
 import { loadMixamoAnimation } from "@/lib/VRMAnimation/loadMixamoAnimation";
@@ -102,6 +103,42 @@ const amicaBones: VRMHumanBoneName[] = [
   "rightUpperArm",
   "rightLowerArm",
   "rightHand",
+];
+
+//TODO: Fixed amica ik chains
+const amicaIKChains = [
+  {
+    target: amicaBones.indexOf('leftFoot'), // Replace with actual bone index from your VRM skeleton
+    effector: amicaBones.indexOf('leftToes'),
+    links: [
+      { index: amicaBones.indexOf('leftLowerLeg'), rotationMin: new THREE.Vector3(0, 0, -1), rotationMax: new THREE.Vector3(0, 0, 1) },
+      { index: amicaBones.indexOf('leftUpperLeg'), rotationMin: new THREE.Vector3(0, -1, -1), rotationMax: new THREE.Vector3(1, 1, 1) },
+    ],
+  },
+  {
+    target: amicaBones.indexOf('rightFoot'),
+    effector: amicaBones.indexOf('rightToes'),
+    links: [
+      { index: amicaBones.indexOf('rightLowerLeg'), rotationMin: new THREE.Vector3(0, 0, -1), rotationMax: new THREE.Vector3(0, 0, 1) },
+      { index: amicaBones.indexOf('rightUpperLeg'), rotationMin: new THREE.Vector3(0, -1, -1), rotationMax: new THREE.Vector3(1, 1, 1) },
+    ],
+  },
+  {
+    target: amicaBones.indexOf('leftHand'),
+    effector: amicaBones.indexOf('leftLowerArm'),
+    links: [
+      { index: amicaBones.indexOf('leftUpperArm'), rotationMin: new THREE.Vector3(-1, -1, 0), rotationMax: new THREE.Vector3(1, 1, 0) },
+      { index: amicaBones.indexOf('leftShoulder'), rotationMin: new THREE.Vector3(-1, -1, 0), rotationMax: new THREE.Vector3(1, 1, 0) },
+    ],
+  },
+  {
+    target: amicaBones.indexOf('rightHand'),
+    effector: amicaBones.indexOf('rightLowerArm'),
+    links: [
+      { index: amicaBones.indexOf('rightUpperArm'), rotationMin: new THREE.Vector3(-1, -1, 0), rotationMax: new THREE.Vector3(1, 1, 0) },
+      { index: amicaBones.indexOf('rightShoulder'), rotationMin: new THREE.Vector3(-1, -1, 0), rotationMax: new THREE.Vector3(1, 1, 0) },
+    ],
+  },
 ];
 
 /**
@@ -194,6 +231,9 @@ export class Viewer {
   private tempBtVec3_1: any;
 
   private scenario: any;
+
+  private selectedBone: any;
+  private ikSolver?: CCDIKSolver;
 
   constructor() {
     this.isReady = false;
@@ -683,6 +723,26 @@ export class Viewer {
     );
     this.modelTargets = [this.modelMeshHelper];
 
+
+    let skinMesh: THREE.SkinnedMesh| null = null;
+    this.model.vrm.scene.traverse((child) => {
+      if (child instanceof THREE.SkinnedMesh) {
+        skinMesh = child;
+      }
+    });
+
+    if (!skinMesh) {
+      console.error("No SkinnedMesh found in VRM model.");
+      return;
+    } else {
+      console.log("Found SkinnedMesh:", skinMesh);
+    }
+    
+    // Apply IK
+    const ikSolver = new CCDIKSolver(skinMesh);
+    const ikHelper = new CCDIKHelper(skinMesh); // Visualize IK joints and constraints
+    this.scene!.add(ikHelper);
+
     if (config("debug_gfx") === "true") {
       this.scene!.add(this.modelMeshHelper);
     }
@@ -1101,7 +1161,8 @@ export class Viewer {
         if (closestBone) {
           closestPart.position.copy(closestBone.getWorldPosition(vec3));
           closestPart.scale.setScalar(0.1);
-          // closestPart.visible = true;
+          closestPart.visible = true;
+          this.selectedBone = closestBone;
           // console.log('closest bone', closestname);
         }
       };
@@ -1126,6 +1187,18 @@ export class Viewer {
         this.createBallAtPoint(this.intersectsRoom[0].point, 1);
       }
     };
+
+    // Detect pinch and drag
+    // if (this.isPinching1) {
+    //   // Check if there’s a selected bone
+    //   if (this.selectedBone) {
+    //     const dragPosition = this.getDragPosition();
+        
+    //     // Apply the drag position to the IK solver
+    //     this.ikSolver?.(this.selectedBone, dragPosition);
+    //     this.ikSolver.update();
+    //   }
+    // }
 
     if (!this.usingController1 && !this.usingController2) {
       this.raycaster.setFromCamera(this.mouse, this.camera!);
@@ -1207,6 +1280,8 @@ export class Viewer {
     this.updateHands();
 
     this.stats!.update();
+
+    this.ikSolver?.update();
 
     let ptime = performance.now();
 
